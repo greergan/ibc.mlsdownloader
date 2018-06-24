@@ -7,18 +7,24 @@ const sql = require('mssql'),
 	config = require('./config.json');
 
 /*
-Residential      = "RESI"
-Multifamily      = "MULTI"
-Commercial       = "COMM"
-Land             = "LAND"
-ResidentialRooms = "ROOMS"
-Units            = "UNITS"
-OpenHouse        = "OPEN_HOUSES"
+Residential      = "PROPERTY.RESI"
+Multifamily      = "PROPERTY.MULTI"
+Commercial       = "PROPERTY.COMM"
+Land             = "PROPERTY.LAND"
+ResidentialRooms = "MISC.ROOMS"
+Units            = "MISC.UNITS"
+OpenHouse        = "MISC.OPEN_HOUSES"
+
+alter table [MLSRets].[dbo].[OPEN_HOUSES] add  MATRIX_UNIQUE_ID bigint
 */
 
-const getPropertyData = async args => {
+const doQuery = async (pool, sqlStr) => {
+	return await pool.request().query(sqlStr);
+};
+
+const getData = async args => {
 	return args.client.search
-		.query('Property', args.search.type, args.search.dt_mod, {
+		.query(args.search.class, args.search.type, args.search.dt_mod, {
 			limit: args.search.limit,
 			offset: args.search.offset,
 		})
@@ -29,10 +35,6 @@ const getPropertyData = async args => {
 			args.search.complete = args.search.offset >= args.search.count ? true : false;
 			return args;
 		});
-};
-
-const doQuery = async (pool, sqlStr) => {
-	return await pool.request().query(sqlStr);
 };
 
 const prepareValue = (elementType, value) => {
@@ -48,36 +50,34 @@ const prepareValue = (elementType, value) => {
 	return value;
 };
 
-/*
-*  When the program is updated to grab other than residental listings
-*  then modify this function to be more dynamic based on type of Property
-*/
-
-const updateMLSInfo = async args => {
+const updateDatabase = async args => {
 	const searchData = args.searchData;
-	const allMLSNumbers = _.pluck(searchData, 'MLS_NUMBER');
+	const allNumbers = _.pluck(searchData, args.search.key);
 
 	const tableMetadata = (await doQuery(args.pool, `SELECT TOP 1 * FROM ${args.search.type}`)).recordset.columns;
 
-	const toUpdateSql = `SELECT MLS_NUMBER FROM ${args.search.type} WHERE MLS_NUMBER IN (${allMLSNumbers.join()})`;
+	const toUpdateSql = `SELECT ${args.search.key} FROM ${args.search.type} WHERE ${args.search.key} IN (${allNumbers.join()})`;
 	const toUpdate = (await doQuery(args.pool, toUpdateSql)).recordset;
 
 	const updateBase = `UPDATE ${args.search.type} SET `;
 	const insertBase = `INSERT INTO ${args.search.type} (${_.keys(tableMetadata).join()}) `;
 
-	let insertMLSNumbers = _.clone(allMLSNumbers);
-	args.data.updates = (await Promise
+	let insertNumbers = _.clone(allNumbers);
+
+	args.search.updates = (await Promise
 		.all(
 			toUpdate.map(async existing => {
 				const updateValues = [];
-				const listing = _.find(searchData, { MLS_NUMBER: existing.MLS_NUMBER.toString() });
+				const search = {};
+				search[args.search.key] = existing[args.search.key].toString();
+				const listing = _.find(searchData, search);
 				_.keys(tableMetadata).map(key => {
 					updateValues.push(`${key}=${prepareValue(tableMetadata[key].type, listing[key])}`);
-					insertMLSNumbers = _.without(insertMLSNumbers, listing.MLS_NUMBER.toString());
+					insertNumbers = _.without(insertNumbers, listing[args.search.key].toString());
 				});
 				return (await doQuery(
 					args.pool,
-					`${updateBase} ${updateValues.join()} WHERE MLS_NUMBER=${listing.MLS_NUMBER};`
+					`${updateBase} ${updateValues.join()} WHERE ${args.search.key}=${listing[args.search.key]};`
 				)).rowsAffected[0];
 			})
 		)
@@ -92,11 +92,13 @@ const updateMLSInfo = async args => {
 		})) ||
 		0;
 
-	args.data.inserts = (await Promise
+	args.search.inserts = (await Promise
 		.all(
-			insertMLSNumbers.map(async mlsnumber => {
+			insertNumbers.map(async objectnumber => {
 				const insertValues = [];
-				const listing = _.find(searchData, { MLS_NUMBER: mlsnumber.toString() });
+				const search = {};
+				search[args.search.key] = objectnumber.toString();
+				const listing = _.find(searchData, search);
 				_.keys(tableMetadata).map(key => {
 					insertValues.push(prepareValue(tableMetadata[key].type, listing[key]));
 				});
@@ -118,59 +120,67 @@ const updateMLSInfo = async args => {
 		0;
 };
 
-const downloadImages = async args => {
+const downloadImages = async (mlsnumber, type, args) => {
 	/*
-	return args.client.search
-		.query('Property', args.search.type, args.search.dt_mod, {
-			limit: args.search.limit,
-			offset: args.search.offset,
+	const listing = _.find(args.searchData, {"MLS_NUMBER": mlsnumber });
+	console.log(listing.PHOTO_COUNT + ' ' + listing.PHOTO_MODIFIED_DATE)
+*/
+	console.log(args.client.objects.getObjects.toString());
+
+	return args.client.objects
+		.getAllObjects('Property', type, mlsnumber)
+		.then(results => {
+			console.log(results);
 		})
-		.then(searchData => {
-			args.searchData = searchData.results;
-			args.search.count = searchData.count;
-			args.search.offset += searchData.rowsReceived;
-			args.search.complete = args.search.offset >= args.search.count ? true : false;
-			return args;
+		.catch(err => {
+			throw err;
 		});
-*/
-	/*
-	return client.objects.getAllObjects("Property", "LargePhoto", photoSourceId, {alwaysGroupObjects: true, ObjectData: '*'})
-    }).then(function (photoResults) {
-      console.log("=================================");
-      console.log("========  Photo Results  ========");
-      console.log("=================================");
-      console.log('   ~~~~~~~~~ Header Info ~~~~~~~~~');
-      outputFields(photoResults.headerInfo);
-      for (var i = 0; i < photoResults.objects.length; i++) {
-        console.log("   -------- Photo " + (i + 1) + " --------");
-        if (photoResults.objects[i].error) {
-          console.log("      Error: " + photoResults.objects[i].error);
-        } else {
-          outputFields(photoResults.objects[i].headerInfo);
-          fs.writeFileSync(
-            "/tmp/photo" + (i + 1) + "." + photoResults.objects[i].headerInfo.contentType.match(/\w+\/(\w+)/i)[1],
-            photoResults.objects[i].data);
-        }
-      }
-    });
-*/
+};
+const downloadAllImages = async (mlsnumber, args) => {
+	return (await Promise
+		.all(
+			args.photo.types.map(async type => {
+				return await downloadImages(mlsnumber, type, args);
+			})
+		)
+		.then(results => {
+			results[0] = results[0] || 0;
+			return results.reduce((total, num) => {
+				return total + num;
+			});
+		})
+		.catch(err => {
+			throw err;
+		})) ||
+		0;
 };
 
 const processPhotoData = async args => {
-	console.log(args.photo.types);
+	args.photo.downloaded = (await Promise
+		.all(
+			args.searchData.map(async listing => {
+				return await downloadAllImages(listing.MLS_NUMBER, args);
+			})
+		)
+		.then(results => {
+			results[0] = results[0] || 0;
+			return results.reduce((total, num) => {
+				return total + num;
+			});
+		})
+		.catch(err => {
+			throw err;
+		})) ||
+		0;
 };
 
 const processData = async args => {
 	try {
-		const results = await getPropertyData(args);
+		const results = await getData(args);
 		if (results.searchData.length > 0) {
-			switch (results.search.type) {
-				case 'RESI':
-					await updateMLSInfo(results);
-					if (results.search.getPhotos) {
-						await processPhotoData(args);
-					}
-					break;
+			await updateDatabase(results);
+			if (results.search.getPhotos) {
+				await processPhotoData(args);
 			}
 		}
 		delete args.searchData;
@@ -185,31 +195,50 @@ const processData = async args => {
 *  Main program
 */
 rets.getAutoLogoutClient(config.matrixrets, client => {
-	const args = {
-		client: client,
-		search: config.search.residential,
-		data: {
-			inserts: 0,
-			updates: 0,
-		},
-	};
-	let dt_mod = moment().add(-args.search.days, 'days').format('YYYY-MM-DD') + '+';
-	args.search.dt_mod = '(DT_MOD=' + dt_mod + ')';
-	args.photo = {};
-	args.photo.directory = config.photo.directory[env];
-	args.photo.types = config.photo.types;
+	sql
+		.connect(config.db[env].mssql)
+		.then(pool => {
+			(async pool => {
+				const results = await Promise
+					.all(
+						config.searchs.map(async search => {
+							search.error = null;
+							search.inserts = 0;
+							search.updates = 0;
+							search.dt_mod = `(DT_MOD=${moment().add(-search.days, 'days').format('YYYY-MM-DD')}+)`;
 
-	var results = (async args => {
-		args.pool = await sql.connect(config.db[env].mssql);
-		return await processData(args).then(results => {
-			return results;
+							const photo = {};
+							if (search.getPhotos === true) {
+								photo.directory = config.photo.directory[env];
+								photo.types = config.photo.types;
+								photo.downloads = 0;
+								photo.deletes = 0;
+							}
+
+							const args = {
+								pool: pool,
+								client: client,
+								search: search,
+								photo: photo,
+							};
+							return await processData(args).then(results => {
+								return results;
+							});
+						})
+					)
+					.then(results => {
+						results.map(r => {
+							console.log(r.search);
+						});
+						pool.close();
+						sql.close();
+					})
+					.catch(err => {
+						console.log(err);
+					});
+			})(pool);
+		})
+		.catch(err => {
+			console.log(err);
 		});
-	})(args);
-
-	results.then(data => {
-		console.log(data.search);
-		console.log(data.data);
-		data.pool.close();
-		sql.close();
-	});
 });
