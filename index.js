@@ -3,7 +3,6 @@ const sql = require('mssql'),
 	_ = require('underscore'),
 	moment = require('moment'),
 	rets = require('rets-client'),
-	{ gzip, ungzip } = require('node-gzip'),
 	env = process.env.NODE_ENV || 'test',
 	config = require('./config.json');
 
