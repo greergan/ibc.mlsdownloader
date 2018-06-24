@@ -1,5 +1,6 @@
 'use strict';
-const sql = require('mssql'),
+const fs = require('fs'),
+	sql = require('mssql'),
 	_ = require('underscore'),
 	moment = require('moment'),
 	rets = require('rets-client'),
@@ -120,27 +121,47 @@ const updateDatabase = async args => {
 		0;
 };
 
-const downloadImages = async (mlsnumber, type, args) => {
-	/*
-	const listing = _.find(args.searchData, {"MLS_NUMBER": mlsnumber });
-	console.log(listing.PHOTO_COUNT + ' ' + listing.PHOTO_MODIFIED_DATE)
-*/
-	//console.log(args.client.objects.getObjects.toString());
-
+const downloadImages = async (listing, type, args) => {
 	return args.client.objects
-		.getAllObjects('Property', type, mlsnumber)
+		.getAllObjects(args.search.class, type, listing.MATRIX_UNIQUE_ID)
 		.then(results => {
-			//console.log(results);
+			const images = [];
+			results.objects.forEach(obj => {
+				if (obj['headerInfo'].contentType === 'image/jpeg') {
+					images.push(obj);
+				}
+			});
+
+			images.map(image => {
+				let size = '';
+				switch (type) {
+					case 'LargePhoto':
+						size = '.L';
+						break;
+					case 'xLargePhoto':
+						size = '.X';
+						break;
+					case 'xxLarge':
+						size = '.XX';
+						break;
+					default:
+						size = '';
+				}
+				const fileName = `${listing.MLS_NUMBER}${size}.${image.headerInfo.objectId}.jpg`;
+				const filePath = `${args.photo.directory}\\${fileName}`;
+				fs.writeFileSync(filePath, image.data);
+			});
+			return images.length;
 		})
 		.catch(err => {
 			args.photo.error = err;
 		});
 };
-const downloadAllImages = async (mlsnumber, args) => {
+const downloadAllImages = async (listing, args) => {
 	return (await Promise
 		.all(
 			args.photo.types.map(async type => {
-				return await downloadImages(mlsnumber, type, args);
+				return await downloadImages(listing, type, args);
 			})
 		)
 		.then(results => {
@@ -159,7 +180,8 @@ const processPhotoData = async args => {
 	args.photo.downloaded = (await Promise
 		.all(
 			args.searchData.map(async listing => {
-				return await downloadAllImages(listing.MLS_NUMBER, args);
+				//console.log(args.client.objects.getObjects.toString());
+				return await downloadAllImages(listing, args);
 			})
 		)
 		.then(results => {
@@ -175,7 +197,7 @@ const processPhotoData = async args => {
 };
 
 const processData = async args => {
-	if(!args.search.run) {
+	if (!args.search.run) {
 		return args;
 	}
 	try {
@@ -234,11 +256,11 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 					)
 					.then(results => {
 						results.map(r => {
-							if(r.search.run) {
+							if (r.search.run) {
 								console.log(r.search);
 							}
-							if(_.has(r, 'photo') && r.photo.error !== null) {
-								console.log(r.photo.error);
+							if (_.has(r, 'photo')) {
+								console.log(r.photo);
 							}
 						});
 						pool.close();
