@@ -1,0 +1,32 @@
+{
+    "search": {
+        "residential": {
+            "type": "RESI",
+            "getPhotos": true,
+            "days": 1,
+            "limit": 2,
+            "offset": 0,
+            "count": 0,
+            "complete": false,
+            "test": true
+        }
+    },
+    "matrixrets": {
+        "loginUrl": "https://matrixrets.heartlandmls.com/rets/login.ashx",
+        "username": "USERNAME",
+        "password": "PASSWORD",
+        "version": "RETS/1.8.5",
+        "userAgent": "IBC-RETS/1.0",
+        "userAgentPassword": "123456"
+    },
+    "mssql": {
+        "user": "USERNAME",
+        "password": "PASSWORD",
+        "server": "SERVER",
+        "database": "DATABASE_NAME",
+        "options": {
+            "encrypt": false,
+            "tdsVersion": "7_1"
+        }
+    }
+}

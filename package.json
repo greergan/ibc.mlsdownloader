@@ -1,0 +1,23 @@
+{
+  "name": "mlsdownloader",
+  "version": "1.0.0",
+  "description": "Download MSL data and images.",
+  "main": "src/hummer.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": [
+    {
+      "name": "Jeff Greer",
+      "email": "jgreer@builderconsulting.com",
+      "url": "http://www.builderconsulting.com/"
+    }
+  ],
+  "license": "ISC",
+  "dependencies": {
+    "moment": "^2.22.2",
+    "mssql": "^4.1.0",
+    "rets-client": "^5.2.1",
+    "underscore": "^1.9.1"
+  }
+}
