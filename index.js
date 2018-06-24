@@ -125,15 +125,15 @@ const downloadImages = async (mlsnumber, type, args) => {
 	const listing = _.find(args.searchData, {"MLS_NUMBER": mlsnumber });
 	console.log(listing.PHOTO_COUNT + ' ' + listing.PHOTO_MODIFIED_DATE)
 */
-	console.log(args.client.objects.getObjects.toString());
+	//console.log(args.client.objects.getObjects.toString());
 
 	return args.client.objects
 		.getAllObjects('Property', type, mlsnumber)
 		.then(results => {
-			console.log(results);
+			//console.log(results);
 		})
 		.catch(err => {
-			throw err;
+			args.photo.error = err;
 		});
 };
 const downloadAllImages = async (mlsnumber, args) => {
@@ -150,7 +150,7 @@ const downloadAllImages = async (mlsnumber, args) => {
 			});
 		})
 		.catch(err => {
-			throw err;
+			args.photo.error = err;
 		})) ||
 		0;
 };
@@ -169,12 +169,15 @@ const processPhotoData = async args => {
 			});
 		})
 		.catch(err => {
-			throw err;
+			args.photo.error = err;
 		})) ||
 		0;
 };
 
 const processData = async args => {
+	if(!args.search.run) {
+		return args;
+	}
 	try {
 		const results = await getData(args);
 		if (results.searchData.length > 0) {
@@ -207,20 +210,23 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 							search.updates = 0;
 							search.dt_mod = `(DT_MOD=${moment().add(-search.days, 'days').format('YYYY-MM-DD')}+)`;
 
-							const photo = {};
-							if (search.getPhotos === true) {
-								photo.directory = config.photo.directory[env];
-								photo.types = config.photo.types;
-								photo.downloads = 0;
-								photo.deletes = 0;
-							}
-
 							const args = {
 								pool: pool,
 								client: client,
 								search: search,
-								photo: photo,
 							};
+
+							if (search.getPhotos === true) {
+								const photo = {
+									error: null,
+									downloads: 0,
+									deletes: 0,
+									types: config.photo.types,
+									directory: config.photo.directory[env],
+								};
+								args.photo = photo;
+							}
+
 							return await processData(args).then(results => {
 								return results;
 							});
@@ -228,13 +234,20 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 					)
 					.then(results => {
 						results.map(r => {
-							console.log(r.search);
+							if(r.search.run) {
+								console.log(r.search);
+							}
+							if(_.has(r, 'photo') && r.photo.error !== null) {
+								console.log(r.photo.error);
+							}
 						});
 						pool.close();
 						sql.close();
 					})
 					.catch(err => {
 						console.log(err);
+						pool.close();
+						sql.close();
 					});
 			})(pool);
 		})
