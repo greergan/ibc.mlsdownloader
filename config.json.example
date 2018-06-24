@@ -1,32 +1,48 @@
 {
-    "search": {
-        "residential": {
-            "type": "RESI",
-            "getPhotos": true,
-            "days": 1,
-            "limit": 2,
-            "offset": 0,
-            "count": 0,
-            "complete": false,
-            "test": true
+    "db": {
+        "prod": {
+            "mssql": {
+                "database": "DATABASE",
+                "options": {
+                    "encrypt": false,
+                    "tdsVersion": "7_1"
+                },
+                "password": "PASS",
+                "server": "SERVER",
+                "user": "USER"
+            }
+        },
+        "test": {
+            "mssql": {
+                "database": "DATABASE",
+                "password": "PASS",
+                "server": "SERVER",
+                "user": "USER"
+            }
         }
     },
     "matrixrets": {
         "loginUrl": "https://matrixrets.heartlandmls.com/rets/login.ashx",
-        "username": "USERNAME",
-        "password": "PASSWORD",
-        "version": "RETS/1.8.5",
-        "userAgent": "IBC-RETS/1.0",
-        "userAgentPassword": "123456"
+        "password": "PASS",
+        "userAgent": "DOTCOM-RETS/1.0",
+        "userAgentPassword": "123456",
+        "username": "USER",
+        "version": "RETS/1.8.5"
     },
-    "mssql": {
-        "user": "USERNAME",
-        "password": "PASSWORD",
-        "server": "SERVER",
-        "database": "DATABASE_NAME",
-        "options": {
-            "encrypt": false,
-            "tdsVersion": "7_1"
+    "photoDirectory": {
+        "prod": "E:\\mls_images",
+        "test": "C:\\mls_images"
+    },
+    "search": {
+        "residential": {
+            "complete": false,
+            "count": 0,
+            "days": 1,
+            "getPhotos": true,
+            "limit": 1,
+            "offset": 0,
+            "test": true,
+            "type": "RESI"
         }
     }
 }
