@@ -15,6 +15,9 @@
         "test": {
             "mssql": {
                 "database": "DATABASE",
+                "options": {
+                    "encrypt": true
+                },
                 "password": "PASS",
                 "server": "SERVER",
                 "user": "USER"
@@ -29,9 +32,17 @@
         "username": "USER",
         "version": "RETS/1.8.5"
     },
-    "photoDirectory": {
-        "prod": "E:\\mls_images",
-        "test": "C:\\mls_images"
+    "photo": {
+        "directory": {
+            "prod": "E:\\mls_images",
+            "test": "C:\\mls_images"
+        },
+        "types": [
+            "Photo",
+            "LargePhoto",
+            "xLargePhoto",
+            "xxLarge"
+        ]
     },
     "search": {
         "residential": {

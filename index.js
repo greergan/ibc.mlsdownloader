@@ -48,17 +48,22 @@ const prepareValue = (elementType, value) => {
 	return value;
 };
 
-const updateResidental = async args => {
+/*
+*  When the program is updated to grab other than residental listings
+*  then modify this function to be more dynamic based on type of Property
+*/
+
+const updateMLSInfo = async args => {
 	const searchData = args.searchData;
 	const allMLSNumbers = _.pluck(searchData, 'MLS_NUMBER');
 
-	const tableMetadata = (await doQuery(args.pool, 'SELECT TOP 1 * FROM RESI')).recordset.columns;
+	const tableMetadata = (await doQuery(args.pool, `SELECT TOP 1 * FROM ${args.search.type}`)).recordset.columns;
 
-	const toUpdateSql = `SELECT MLS_NUMBER FROM RESI WHERE MLS_NUMBER IN (${allMLSNumbers.join()})`;
+	const toUpdateSql = `SELECT MLS_NUMBER FROM ${args.search.type} WHERE MLS_NUMBER IN (${allMLSNumbers.join()})`;
 	const toUpdate = (await doQuery(args.pool, toUpdateSql)).recordset;
 
-	const updateBase = 'UPDATE RESI SET ';
-	const insertBase = 'INSERT INTO RESI (' + _.keys(tableMetadata).join() + ') ';
+	const updateBase = `UPDATE ${args.search.type} SET `;
+	const insertBase = `INSERT INTO ${args.search.type} (${_.keys(tableMetadata).join()}) `;
 
 	let insertMLSNumbers = _.clone(allMLSNumbers);
 	args.data.updates = (await Promise
@@ -97,7 +102,7 @@ const updateResidental = async args => {
 				});
 				return (await doQuery(
 					args.pool,
-					insertBase + 'VALUES(' + insertValues.join() + ')'.replace("'NULL'", 'NULL')
+					insertBase + `VALUES(${insertValues.join()})`.replace("'NULL'", 'NULL')
 				)).rowsAffected[0];
 			})
 		)
@@ -113,15 +118,57 @@ const updateResidental = async args => {
 		0;
 };
 
+const downloadImages = async args => {
+	/*
+	return args.client.search
+		.query('Property', args.search.type, args.search.dt_mod, {
+			limit: args.search.limit,
+			offset: args.search.offset,
+		})
+		.then(searchData => {
+			args.searchData = searchData.results;
+			args.search.count = searchData.count;
+			args.search.offset += searchData.rowsReceived;
+			args.search.complete = args.search.offset >= args.search.count ? true : false;
+			return args;
+		});
+*/
+	/*
+	return client.objects.getAllObjects("Property", "LargePhoto", photoSourceId, {alwaysGroupObjects: true, ObjectData: '*'})
+    }).then(function (photoResults) {
+      console.log("=================================");
+      console.log("========  Photo Results  ========");
+      console.log("=================================");
+      console.log('   ~~~~~~~~~ Header Info ~~~~~~~~~');
+      outputFields(photoResults.headerInfo);
+      for (var i = 0; i < photoResults.objects.length; i++) {
+        console.log("   -------- Photo " + (i + 1) + " --------");
+        if (photoResults.objects[i].error) {
+          console.log("      Error: " + photoResults.objects[i].error);
+        } else {
+          outputFields(photoResults.objects[i].headerInfo);
+          fs.writeFileSync(
+            "/tmp/photo" + (i + 1) + "." + photoResults.objects[i].headerInfo.contentType.match(/\w+\/(\w+)/i)[1],
+            photoResults.objects[i].data);
+        }
+      }
+    });
+*/
+};
+
+const processPhotoData = async args => {
+	console.log(args.photo.types);
+};
+
 const processData = async args => {
 	try {
 		const results = await getPropertyData(args);
 		if (results.searchData.length > 0) {
 			switch (results.search.type) {
 				case 'RESI':
-					await updateResidental(results);
-					if (results.getPhotos) {
-						//await downloadPhotos(args.searchData);
+					await updateMLSInfo(results);
+					if (results.search.getPhotos) {
+						await processPhotoData(args);
 					}
 					break;
 			}
@@ -134,6 +181,9 @@ const processData = async args => {
 	}
 };
 
+/*
+*  Main program
+*/
 rets.getAutoLogoutClient(config.matrixrets, client => {
 	const args = {
 		client: client,
@@ -145,6 +195,9 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 	};
 	let dt_mod = moment().add(-args.search.days, 'days').format('YYYY-MM-DD') + '+';
 	args.search.dt_mod = '(DT_MOD=' + dt_mod + ')';
+	args.photo = {};
+	args.photo.directory = config.photo.directory[env];
+	args.photo.types = config.photo.types;
 
 	var results = (async args => {
 		args.pool = await sql.connect(config.db[env].mssql);
