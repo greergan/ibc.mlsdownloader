@@ -32,26 +32,19 @@ const getPropertyData = async args => {
 };
 
 const doQuery = async (pool, sqlStr) => {
-	console.log(sqlStr)
 	return await pool.request().query(sqlStr);
 };
 
 const prepareValue = (elementType, value) => {
 	value = value || 'NULL';
 
-	if (elementType === sql.DateTime) {
+	if (elementType === sql.DateTime && value !== 'NULL') {
 		return "'" + moment(value).format('YYYYMMDD h:mm:ss a') + "'";
-	}
-
-	if (elementType === sql.VarChar && value !== null) {
-		return "'" + value.replace("'", "''").trim() + "'";
-	}
-
-	/* convert bit to 0/1 */
-	if (elementType === sql.Bit) {
+	} else if (elementType === sql.VarChar && value !== 'NULL') {
+		return "'" + value.replace(/'/gi, "''").trim() + "'";
+	} else if (elementType === sql.Bit) {
 		return value === true ? 1 : 0;
 	}
-
 	return value;
 };
 
