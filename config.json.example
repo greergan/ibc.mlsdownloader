@@ -44,8 +44,9 @@
             "xxLarge"
         ]
     },
-    "search": {
-        "residential": {
+	"searches": [
+        {
+			"run": true,
             "complete": false,
             "count": 0,
             "days": 1,
@@ -53,7 +54,21 @@
             "limit": 1,
             "offset": 0,
             "test": true,
+			"class": "Property",
+			"key": "MLS_NUMBER",
             "type": "RESI"
+        },
+		{
+			"run": false,
+            "complete": false,
+            "count": 0,
+            "days": 1,
+            "limit": 500,
+            "offset": 0,
+            "test": true,
+			"class": "Misc",
+			"key": "MATRIX_UNIQUE_ID",
+            "type": "OPEN_HOUSES"
         }
-    }
+	]
 }
