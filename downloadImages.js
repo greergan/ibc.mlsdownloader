@@ -235,7 +235,7 @@ const downloadImages = (listing, type, args) => {
 				const filePath = `${args.photo.directory}\\${fileName}`;
 				fs.writeFileSync(filePath, image.data);
 			});
-			return images.length;
+			return images.length
 		})
 		.catch(err => {
 			if(err.httpStatus === 504 && listing.retries < 10) {
@@ -247,55 +247,26 @@ const downloadImages = (listing, type, args) => {
 			}
 			else {
 				args.photo.errors.push(err);
-				return(0);
 			}
 		});
 };
-const downloadAllImages = async (listing, args) => {
-	return (await Promise
-		.all(
-			args.photo.types.map(type => {
-				return downloadImages(listing, type, args);
-			})
-		)
-		.then(results => {
-			results[0] = results[0] || 0;
-			return results.reduce((total, num) => {
-				return total + num;
+
+const processPhotoData = async args => {
+	return await (async args => {
+		const listingsWithPhotos = _.filter(args.searchData, listing => {
+			return listing.PHOTO_COUNT > 0 && moment(listing.PHOTO_MODIFIED_DATE) >= moment(args.search.date);
+		});
+		console.log(`Downloading images: offset ${args.search.offset} - found ${listingsWithPhotos.length} matching entries`);
+		listingsWithPhotos.forEach(listing => {
+			args.photo.types.forEach(async type => {
+				downloadImages(listing, type, args);
 			});
-		})
-		.catch(err => {
-			throw err;
-		})) ||
-		0;
+		});
+		return(args);
+	})(args);
 };
 
-const processPhotoDataAsync = async args => {
-	const listingsWithPhotos = _.filter(args.searchData, listing => {
-		return listing.PHOTO_COUNT > 0 && moment(listing.PHOTO_MODIFIED_DATE) >= moment(args.search.date);
-	});
-
-	console.log(`Downloading images: offset ${args.search.offset} - found ${listingsWithPhotos.length} matching entries`);
-
-	args.photo.downloaded += (await Promise
-		.all(
-			listingsWithPhotos.map(async (listing, index) => {
-				return await downloadAllImages(listing, args);
-			})
-		)
-		.then(results => {
-			results[0] = results[0] || 0;
-			return results.reduce((total, num) => {
-				return total + num;
-			});
-		})
-		.catch(err => {
-			args.photo.errors.push(err);
-		})) ||
-		0;
-};
-
-const processData = async args => {
+const processData = async (args, cb) => {
 	if (!args.search.run) {
 		return args;
 	}
@@ -304,10 +275,11 @@ const processData = async args => {
 		if (results.searchData.length > 0) {
 			await updateDatabase(results);
 			if (results.search.getPhotos) {
-				await processPhotoData(args);
+				return await processPhotoData(args);
 			}
 		}
 		delete args.searchData;
+		//(results.search.complete || results.search.test) ? cb(args) : await processData(results);
 		return results.search.complete || results.search.test ? results : await processData(results);
 	} catch (err) {
 		args.search.errors.push(err);
@@ -349,7 +321,6 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 								};
 								args.photo = photo;
 							}
-
 							return await processData(args).then(results => {
 								return results;
 							});
