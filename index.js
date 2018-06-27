@@ -17,6 +17,9 @@ Units            = "MISC.UNITS"
 OpenHouse        = "MISC.OPEN_HOUSES"
 
 alter table [MLSRets].[dbo].[OPEN_HOUSES] add  MATRIX_UNIQUE_ID bigint
+ALTER TABLE [RESI] ALTER COLUMN [REMARKS] VARCHAR(550)
+ALTER TABLE [RESI] ALTER COLUMN L_OFF_NAME VARCHAR(60)
+ALTER TABLE [RESI] ALTER COLUMN L_OFF_PHONE VARCHAR(20)
 */
 
 const doQuery = async (pool, sqlStr) => {
@@ -61,11 +64,14 @@ const updateDatabase = async args => {
 	const toUpdate = (await doQuery(args.pool, toUpdateSql)).recordset;
 
 	const updateBase = `UPDATE ${args.search.type} SET `;
-	const insertBase = `INSERT INTO ${args.search.type} (${_.keys(tableMetadata).join()}) `;
+	const insertBase = `INSERT INTO ${args.search.type} (${_.keys(tableMetadata).join()})`;
 
 	let insertNumbers = _.clone(allNumbers);
+	let sqlStr = '';
 
-	args.search.updates = (await Promise
+	console.log(`Database processing offset: ${args.search.offset}`);
+
+	args.search.updates += (await Promise
 		.all(
 			toUpdate.map(async existing => {
 				const updateValues = [];
@@ -76,10 +82,8 @@ const updateDatabase = async args => {
 					updateValues.push(`${key}=${prepareValue(tableMetadata[key].type, listing[key])}`);
 					insertNumbers = _.without(insertNumbers, listing[args.search.key].toString());
 				});
-				return (await doQuery(
-					args.pool,
-					`${updateBase} ${updateValues.join()} WHERE ${args.search.key}=${listing[args.search.key]};`
-				)).rowsAffected[0];
+				sqlStr = `${updateBase} ${updateValues.join()} WHERE ${args.search.key}=${listing[args.search.key]};`;
+				return (await doQuery(args.pool, sqlStr)).rowsAffected[0];
 			})
 		)
 		.then(results => {
@@ -89,11 +93,13 @@ const updateDatabase = async args => {
 			});
 		})
 		.catch(err => {
+			console.log(sqlStr);
+			err.sql = sqlStr;
 			throw err;
 		})) ||
 		0;
 
-	args.search.inserts = (await Promise
+	args.search.inserts += (await Promise
 		.all(
 			insertNumbers.map(async objectnumber => {
 				const insertValues = [];
@@ -103,10 +109,8 @@ const updateDatabase = async args => {
 				_.keys(tableMetadata).map(key => {
 					insertValues.push(prepareValue(tableMetadata[key].type, listing[key]));
 				});
-				return (await doQuery(
-					args.pool,
-					insertBase + `VALUES(${insertValues.join()})`.replace("'NULL'", 'NULL')
-				)).rowsAffected[0];
+				sqlStr = `${insertBase} VALUES(${insertValues.join()})`.replace("'NULL'", 'NULL');
+				return (await doQuery(args.pool, sqlStr)).rowsAffected[0];
 			})
 		)
 		.then(results => {
@@ -116,12 +120,26 @@ const updateDatabase = async args => {
 			});
 		})
 		.catch(err => {
+			console.log(sqlStr);
+			err.sql = sqlStr;
 			throw err;
 		})) ||
 		0;
 };
 
-const downloadImages = async (listing, type, args) => {
+const downloadImagesAsync = async (listing, type, args) => {
+	if(!_.has(listing, 'retries')) {
+		listing.retries = 0;
+	}
+	else {
+		listing.retries++;
+	}
+	args.photo.currentDownload = {
+		listing: listing,
+		type: type,
+		args: args
+	};
+
 	return args.client.objects
 		.getAllObjects(args.search.class, type, listing.MATRIX_UNIQUE_ID)
 		.then(results => {
@@ -154,14 +172,90 @@ const downloadImages = async (listing, type, args) => {
 			return images.length;
 		})
 		.catch(err => {
-			args.photo.error = err;
+			if(err.httpStatus === 504 && listing.retries < 10) {
+				return (async localArgs => {
+					console.log(`retry: ${localArgs.type} - ${localArgs.listing.MLS_NUMBER}`);
+					await downloadImages(localArgs.listing, localArgs.type, localArgs.args);
+				})(args.photo.currentDownload);
+			}
+/*
+			else if(err.replyCode === 20412 && listing.retries < 10) {
+				return (async localArgs => {
+					console.log(`Too many outstanding requests: ${localArgs.type} - ${localArgs.listing.MLS_NUMBER}`);
+					await downloadImages(localArgs.listing, localArgs.type, localArgs.args);
+				})(args.photo.currentDownload);
+			}
+*/
+			else {
+				args.photo.errors.push(err);
+			}
+			return(0);
+		});
+};
+
+const downloadImages = (listing, type, args) => {
+	if(!_.has(listing, 'retries')) {
+		listing.retries = 0;
+	}
+	else {
+		listing.retries++;
+	}
+	args.photo.currentDownload = {
+		listing: listing,
+		type: type,
+		args: args
+	};
+
+	return args.client.objects
+		.getAllObjects(args.search.class, type, listing.MATRIX_UNIQUE_ID)
+		.then(results => {
+			const images = [];
+			results.objects.forEach(obj => {
+				if (obj['headerInfo'].contentType === 'image/jpeg') {
+					images.push(obj);
+				}
+			});
+
+			images.map(image => {
+				let size = '';
+				switch (type) {
+					case 'LargePhoto':
+						size = '.L';
+						break;
+					case 'xLargePhoto':
+						size = '.X';
+						break;
+					case 'xxLarge':
+						size = '.XX';
+						break;
+					default:
+						size = '';
+				}
+				const fileName = `${listing.MLS_NUMBER}${size}.${image.headerInfo.objectId}.jpg`;
+				const filePath = `${args.photo.directory}\\${fileName}`;
+				fs.writeFileSync(filePath, image.data);
+			});
+			return images.length;
+		})
+		.catch(err => {
+			if(err.httpStatus === 504 && listing.retries < 10) {
+				console.log(`retry: ${type} - ${listing.MLS_NUMBER}`);
+				return downloadImages(listing, type, args);
+			}
+			else if(err.replyCode === 20412) {
+				args.photo.errors.push(err.replyText);
+			}
+			else {
+				args.photo.errors.push(err);
+				return(0);
+			}
 		});
 };
 const downloadAllImages = async (listing, args) => {
 	return (await Promise
 		.all(
-			args.photo.types.map(async type => {
-				return await downloadImages(listing, type, args);
+			args.photo.types.map(type => {
+				return downloadImages(listing, type, args);
 			})
 		)
 		.then(results => {
@@ -171,16 +265,21 @@ const downloadAllImages = async (listing, args) => {
 			});
 		})
 		.catch(err => {
-			args.photo.error = err;
+			throw err;
 		})) ||
 		0;
 };
 
-const processPhotoData = async args => {
-	args.photo.downloaded = (await Promise
+const processPhotoDataAsync = async args => {
+	const listingsWithPhotos = _.filter(args.searchData, listing => {
+		return listing.PHOTO_COUNT > 0 && moment(listing.PHOTO_MODIFIED_DATE) >= moment(args.search.date);
+	});
+
+	console.log(`Downloading images: offset ${args.search.offset} - found ${listingsWithPhotos.length} matching entries`);
+
+	args.photo.downloaded += (await Promise
 		.all(
-			args.searchData.map(async listing => {
-				//console.log(args.client.objects.getObjects.toString());
+			listingsWithPhotos.map(async (listing, index) => {
 				return await downloadAllImages(listing, args);
 			})
 		)
@@ -191,7 +290,7 @@ const processPhotoData = async args => {
 			});
 		})
 		.catch(err => {
-			args.photo.error = err;
+			args.photo.errors.push(err);
 		})) ||
 		0;
 };
@@ -211,7 +310,7 @@ const processData = async args => {
 		delete args.searchData;
 		return results.search.complete || results.search.test ? results : await processData(results);
 	} catch (err) {
-		args.search.error = err;
+		args.search.errors.push(err);
 		return args;
 	}
 };
@@ -219,6 +318,7 @@ const processData = async args => {
 /*
 *  Main program
 */
+
 rets.getAutoLogoutClient(config.matrixrets, client => {
 	sql
 		.connect(config.db[env].mssql)
@@ -226,11 +326,12 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 			(async pool => {
 				const results = await Promise
 					.all(
-						config.searchs.map(async search => {
-							search.error = null;
+						config.searches.map(async search => {
+							search.errors = [];
 							search.inserts = 0;
 							search.updates = 0;
-							search.dt_mod = `(DT_MOD=${moment().add(-search.days, 'days').format('YYYY-MM-DD')}+)`;
+							search.date = moment().add(-search.days, 'days').format('YYYY-MM-DD');
+							search.dt_mod = `(DT_MOD=${search.date}+)`;
 
 							const args = {
 								pool: pool,
@@ -238,11 +339,11 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 								search: search,
 							};
 
-							if (search.getPhotos === true) {
+							if (search.getPhotos) {
 								const photo = {
-									error: null,
-									downloads: 0,
-									deletes: 0,
+									errors: [],
+									downloaded: 0,
+									deleted: 0,
 									types: config.photo.types,
 									directory: config.photo.directory[env],
 								};
@@ -260,20 +361,35 @@ rets.getAutoLogoutClient(config.matrixrets, client => {
 								console.log(r.search);
 							}
 							if (_.has(r, 'photo')) {
+								delete r.photo.currentDownload;
 								console.log(r.photo);
 							}
 						});
 						pool.close();
 						sql.close();
+						console.log('logging out')
+						client.logout().then(resp => {
+							//console.log(resp)
+						});
 					})
 					.catch(err => {
-						console.log(err);
 						pool.close();
 						sql.close();
+						client.logout();
+						throw err;
 					});
 			})(pool);
 		})
 		.catch(err => {
+			client.logout();
 			console.log(err);
 		});
+})
+.catch(err => {
+	if(_.has(err, 'replyCode')) {
+		console.log(err.replyText);
+	}
+	else {
+		console.log(err);
+	}
 });
