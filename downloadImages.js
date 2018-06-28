@@ -1,5 +1,6 @@
 'use strict';
 const fs = require('fs'),
+	del = require('del'),
 	sql = require('mssql'),
 	_ = require('underscore'),
 	moment = require('moment'),
@@ -7,6 +8,19 @@ const fs = require('fs'),
 	promiseSerial = require('promise-serial'),
 	env = process.env.NODE_ENV || 'test',
 	config = require('./config.json');
+
+const getImageSizeID = type => {
+	switch (type) {
+		case 'LargePhoto':
+			return '.L';
+		case 'xLargePhoto':
+			return '.X';
+		case 'xxLarge':
+			return '.XX';
+		default:
+			return '';
+	}
+};
 
 const downloadImages = async (listing, type, args) => {
 	if (!_.has(listing, 'retries')) {
@@ -29,20 +43,7 @@ const downloadImages = async (listing, type, args) => {
 			});
 
 			images.map(image => {
-				let size = '';
-				switch (type) {
-					case 'LargePhoto':
-						size = '.L';
-						break;
-					case 'xLargePhoto':
-						size = '.X';
-						break;
-					case 'xxLarge':
-						size = '.XX';
-						break;
-					default:
-						size = '';
-				}
+				let size = getImageSizeID(type);
 				const fileName = `${listing.MLS_NUMBER}${size}.${image.headerInfo.objectId}.jpg`;
 				const filePath = `${args.photo.directory[env]}\\${fileName}`;
 				fs.writeFileSync(filePath, image.data);
@@ -80,6 +81,25 @@ const downloadAllImages = async (listing, args) => {
 		0;
 };
 
+const removeFile = filePath => {
+	try {
+		fs.unlinkSync(filePath);
+	} catch (err) {
+		if (err.errno !== -4058) removeFile(filePath);
+	}
+};
+
+const removeListingImages = async (listing, config) => {
+	for (let type of config.types) {
+		const size = getImageSizeID(type);
+		for (let count = 0; count <= 99; count++) {
+			const fileName = `${listing.MLS_NUMBER}${size}.${count}.jpg`;
+			const filePath = `${config.directory[env]}\\${fileName}`;
+			removeFile(filePath);
+		}
+	}
+};
+
 /*
 *  Main program
 */
@@ -95,7 +115,7 @@ rets
 					const listings = (await pool
 						.request()
 						.query(
-							`SELECT TOP 1 MLS_NUMBER, MATRIX_UNIQUE_ID FROM RESI WHERE PHOTO_MODIFIED_DATE >='${searchDate}' AND PHOTO_COUNT > 0 AND STATUS IN ('Active','Contingent','Model','Pending','Show For Backups')`
+							`SELECT MLS_NUMBER, MATRIX_UNIQUE_ID, PHOTO_COUNT FROM RESI WHERE PHOTO_MODIFIED_DATE >='${searchDate}' AND PHOTO_COUNT > 0 AND STATUS IN ('Active','Contingent','Model','Pending','Show For Backups')`
 						)).recordset;
 
 					const args = {
@@ -106,7 +126,9 @@ rets
 
 					try {
 						console.log(`Donwloading images for ${listings.length} listings`);
+
 						for (let listing of listings) {
+							await removeListingImages(listing, config.photo);
 							args.photo.downloaded += await downloadAllImages(listing, args);
 						}
 						console.log(args.photo);
@@ -119,6 +141,8 @@ rets
 							console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
 						});
 					} catch (err) {
+						pool.close();
+						sql.close();
 						console.log(err);
 						console.log('ERROR: in downloading');
 						client.logout().then(resp => {

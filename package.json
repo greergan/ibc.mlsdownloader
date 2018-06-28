@@ -17,7 +17,6 @@
     "dependencies": {
         "moment": "^2.22.2",
         "mssql": "^4.1.0",
-        "promise-serial": "^0.1.5",
         "rets-client": "^5.2.1",
         "underscore": "^1.9.1"
     }
