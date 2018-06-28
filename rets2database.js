@@ -3,6 +3,7 @@ const sql = require('mssql'),
 	_ = require('underscore'),
 	moment = require('moment'),
 	rets = require('rets-client'),
+	mailer = require('nodemailer'),
 	env = process.env.NODE_ENV || 'test',
 	config = require('./config.json');
 
@@ -137,7 +138,7 @@ const updateDatabase = async args => {
 		0;
 };
 
-const processData = async args  => {
+const processData = async args => {
 	if (!args.search.run) {
 		return args;
 	}
@@ -158,7 +159,8 @@ const processData = async args  => {
 /*
 *  Main program
 */
-console.log(moment().format("MM/DD/YYYY h:mm:ss a"));
+const start = moment().format('MM/DD/YYYY h:mm:ss a');
+console.log(start);
 rets
 	.getAutoLogoutClient(config.matrixrets, client => {
 		sql
@@ -185,35 +187,47 @@ rets
 						)
 						.then(results => {
 							results.map(r => {
-								if (r.search.run) {
-									console.log(r.search);
-								}
+								const end = moment().format('MM/DD/YYYY h:mm:ss a');
+								const transporter = mailer.createTransport(config.email.smtp);
+								const options = config.email.basics;
+								options.subject = options.subjectBase + ` - ${r.search.type}`;
+								options.text = `${JSON.stringify(r.search)}\n${start}\n${end}`;
+								transporter.sendMail(options, (err, info) => {
+									if (err) {
+										console.log(err);
+										console.log('ERROR sending mail');
+									}
+								});
 							});
 							pool.close();
 							sql.close();
 
 							client.logout().then(resp => {
 								console.log('logged out');
-								console.log(moment().format("MM/DD/YYYY h:mm:ss a"));
+								console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
 							});
 						})
 						.catch(err => {
 							pool.close();
 							sql.close();
-							client.logout();
-							throw err;
+							client.logout().then(resp => {
+								console.log('logged out');
+								console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
+							});
 						});
 				})(pool);
 			})
 			.catch(err => {
-				client.logout();
 				console.log(err);
-				console.log("ERROR")
-				console.log(moment().format("MM/DD/YYYY h:mm:ss a"));
+				console.log('ERROR');
+				client.logout().then(resp => {
+					console.log('logged out');
+					console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
+				});
 			});
 	})
 	.catch(err => {
 		console.log(err);
-		console.log("ERROR")
-		console.log(moment().format("MM/DD/YYYY h:mm:ss a"));
+		console.log('ERROR');
+		console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
 	});

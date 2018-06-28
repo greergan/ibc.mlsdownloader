@@ -102,7 +102,8 @@ const removeListingImages = async (listing, config) => {
 /*
 *  Main program
 */
-console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
+const start = moment().format('MM/DD/YYYY h:mm:ss a');
+console.log(start);
 rets
 	.getAutoLogoutClient(config.matrixrets, client => {
 		sql
@@ -128,12 +129,16 @@ rets
 
 						for (let listing of listings) {
 							await removeListingImages(listing, config.photo);
-							//args.photo.downloaded += await downloadAllImages(listing, args);
+							args.photo.downloaded += await downloadAllImages(listing, args);
 						}
 
+						const end = moment().format('MM/DD/YYYY h:mm:ss a');
 						const transporter = mailer.createTransport(config.email.smtp);
 						const options = config.email.basics;
-						options.text = `Downloaded: ${args.photo.downloaded}\nErrors: ${JSON.stringify(args.photo.errors)}`;
+						options.subject = options.subjectBase + ` - downloading for ${listings.length} listings`;
+						options.text = `Downloaded: ${args.photo.downloaded}\nErrors: ${JSON.stringify(
+							args.photo.errors
+						)}\n${start}\n${end}`;
 						transporter.sendMail(options, (err, info) => {
 							if (err) {
 								console.log(err);
