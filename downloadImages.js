@@ -1,11 +1,10 @@
 'use strict';
 const fs = require('fs'),
-	del = require('del'),
 	sql = require('mssql'),
 	_ = require('underscore'),
 	moment = require('moment'),
 	rets = require('rets-client'),
-	promiseSerial = require('promise-serial'),
+	mailer = require('nodemailer'),
 	env = process.env.NODE_ENV || 'test',
 	config = require('./config.json');
 
@@ -129,9 +128,18 @@ rets
 
 						for (let listing of listings) {
 							await removeListingImages(listing, config.photo);
-							args.photo.downloaded += await downloadAllImages(listing, args);
+							//args.photo.downloaded += await downloadAllImages(listing, args);
 						}
-						console.log(args.photo);
+
+						const transporter = mailer.createTransport(config.email.smtp);
+						const options = config.email.basics;
+						options.text = `Downloaded: ${args.photo.downloaded}\nErrors: ${JSON.stringify(args.photo.errors)}`;
+						transporter.sendMail(options, (err, info) => {
+							if (err) {
+								console.log(err);
+								console.log('ERROR sending mail');
+							}
+						});
 
 						pool.close();
 						sql.close();
