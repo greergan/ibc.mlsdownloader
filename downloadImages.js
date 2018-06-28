@@ -1,7 +1,7 @@
 'use strict';
 const fs = require('fs'),
 	sql = require('mssql'),
-	_ = require('underscore'),
+	_ = require('lodash'),
 	moment = require('moment'),
 	rets = require('rets-client'),
 	mailer = require('nodemailer'),

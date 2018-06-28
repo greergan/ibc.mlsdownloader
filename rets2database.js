@@ -1,6 +1,6 @@
 'use strict';
 const sql = require('mssql'),
-	_ = require('underscore'),
+	_ = require('lodash'),
 	moment = require('moment'),
 	rets = require('rets-client'),
 	mailer = require('nodemailer'),
@@ -69,73 +69,51 @@ const prepareValue = (elementType, value) => {
 
 const updateDatabase = async args => {
 	const searchData = args.searchData;
-	const allNumbers = _.pluck(searchData, args.search.key);
-
+	const allNumbers = _.map(searchData, args.search.key);
 	const tableMetadata = (await doQuery(args.pool, `SELECT TOP 1 * FROM ${args.search.type}`)).recordset.columns;
-
 	const toUpdateSql = `SELECT ${args.search.key} FROM ${args.search.type} WHERE ${args.search.key} IN (${allNumbers.join()})`;
 	const toUpdate = (await doQuery(args.pool, toUpdateSql)).recordset;
-
 	const updateBase = `UPDATE ${args.search.type} SET `;
 	const insertBase = `INSERT INTO ${args.search.type} (${_.keys(tableMetadata).join()})`;
 
 	let insertNumbers = _.clone(allNumbers);
 	let sqlStr = '';
 
-	args.search.updates += (await Promise
-		.all(
-			toUpdate.map(async existing => {
-				const updateValues = [];
-				const search = {};
-				search[args.search.key] = existing[args.search.key].toString();
-				const listing = _.find(searchData, search);
-				_.keys(tableMetadata).map(key => {
-					updateValues.push(`${key}=${prepareValue(tableMetadata[key].type, listing[key])}`);
-					insertNumbers = _.without(insertNumbers, listing[args.search.key].toString());
-				});
-				sqlStr = `${updateBase} ${updateValues.join()} WHERE ${args.search.key}=${listing[args.search.key]};`;
-				return (await doQuery(args.pool, sqlStr)).rowsAffected[0];
-			})
-		)
-		.then(results => {
-			results[0] = results[0] || 0;
-			return results.reduce((total, num) => {
-				return total + num;
-			});
-		})
-		.catch(err => {
-			console.log(sqlStr);
-			err.sql = sqlStr;
-			throw err;
-		})) ||
-		0;
+	for (let existing of toUpdate) {
+		const updateValues = [];
+		const search = {};
+		search[args.search.key] = existing[args.search.key].toString();
+		const listing = _.find(searchData, search);
+		_.keys(tableMetadata).map(key => {
+			updateValues.push(`${key}=${prepareValue(tableMetadata[key].type, listing[key])}`);
+			insertNumbers = _.without(insertNumbers, listing[args.search.key].toString());
+		});
+		sqlStr = `${updateBase} ${updateValues.join()} WHERE ${args.search.key}=${listing[args.search.key]};`;
 
-	args.search.inserts += (await Promise
-		.all(
-			insertNumbers.map(async objectnumber => {
-				const insertValues = [];
-				const search = {};
-				search[args.search.key] = objectnumber.toString();
-				const listing = _.find(searchData, search);
-				_.keys(tableMetadata).map(key => {
-					insertValues.push(prepareValue(tableMetadata[key].type, listing[key]));
-				});
-				sqlStr = `${insertBase} VALUES(${insertValues.join()})`.replace("'NULL'", 'NULL');
-				return (await doQuery(args.pool, sqlStr)).rowsAffected[0];
-			})
-		)
-		.then(results => {
-			results[0] = results[0] || 0;
-			return results.reduce((total, num) => {
-				return total + num;
-			});
-		})
-		.catch(err => {
-			console.log(sqlStr);
+		try {
+			args.search.updates += (await doQuery(args.pool, sqlStr)).rowsAffected[0];
+		} catch (err) {
 			err.sql = sqlStr;
-			throw err;
-		})) ||
-		0;
+			args.search.errors.push(err);
+		}
+	}
+
+	for (let objectnumber of insertNumbers) {
+		const insertValues = [];
+		const search = {};
+		search[args.search.key] = objectnumber.toString();
+		const listing = _.find(searchData, search);
+		_.keys(tableMetadata).map(key => {
+			insertValues.push(prepareValue(tableMetadata[key].type, listing[key]));
+		});
+		sqlStr = `${insertBase} VALUES(${insertValues.join()})`.replace("'NULL'", 'NULL');
+		try {
+			args.search.inserts += (await doQuery(args.pool, sqlStr)).rowsAffected[0];
+		} catch (err) {
+			err.sql = sqlStr;
+			args.search.errors.push(err);
+		}
+	}
 };
 
 const processData = async args => {
@@ -167,54 +145,40 @@ rets
 			.connect(config.db[env].mssql)
 			.then(pool => {
 				(async pool => {
-					const results = await Promise
-						.all(
-							config.searches.map(async search => {
-								search.errors = [];
-								search.inserts = 0;
-								search.updates = 0;
-								search.date = moment().add(-search.days, 'days').format('YYYY-MM-DD');
-								search.dt_mod = `(DT_MOD=${search.date}+)`;
+					for (let search of config.searches) {
+						search.errors = [];
+						search.inserts = 0;
+						search.updates = 0;
+						search.date = moment().add(-search.days, 'days').format('YYYY-MM-DD');
+						search.dt_mod = `(DT_MOD=${search.date}+)`;
 
-								return await processData({
-									pool: pool,
-									client: client,
-									search: search,
-								}).then(results => {
-									return results;
-								});
-							})
-						)
-						.then(results => {
-							results.map(r => {
+						await processData({
+							pool: pool,
+							client: client,
+							search: search,
+						}).then(results => {
+							if (results.search.run) {
 								const end = moment().format('MM/DD/YYYY h:mm:ss a');
 								const transporter = mailer.createTransport(config.email.smtp);
 								const options = config.email.basics;
-								options.subject = options.subjectBase + ` - ${r.search.type}`;
-								options.text = `${JSON.stringify(r.search)}\n${start}\n${end}`;
+								options.subject = options.subjectBase + ` - ${results.search.type}`;
+								options.text = `${JSON.stringify(results.search)}\n${start}\n${end}`;
 								transporter.sendMail(options, (err, info) => {
 									if (err) {
-										console.log(err);
 										console.log('ERROR sending mail');
+										console.log(results.search);
+										console.log(end);
 									}
 								});
-							});
-							pool.close();
-							sql.close();
-
-							client.logout().then(resp => {
-								console.log('logged out');
-								console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
-							});
-						})
-						.catch(err => {
-							pool.close();
-							sql.close();
-							client.logout().then(resp => {
-								console.log('logged out');
-								console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
-							});
+							}
 						});
+					}
+					pool.close();
+					sql.close();
+					client.logout().then(resp => {
+						console.log('logged out');
+						console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
+					});
 				})(pool);
 			})
 			.catch(err => {

@@ -15,10 +15,10 @@
     ],
     "license": "ISC",
     "dependencies": {
+        "lodash": "^4.17.10",
         "moment": "^2.22.2",
         "mssql": "^4.1.0",
         "nodemailer": "^4.6.7",
-        "rets-client": "^5.2.1",
-        "underscore": "^1.9.1"
+        "rets-client": "^5.2.1"
     }
 }
