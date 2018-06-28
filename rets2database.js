@@ -191,7 +191,7 @@ rets
 							});
 							pool.close();
 							sql.close();
-							console.log('logging out');
+
 							client.logout().then(resp => {
 								console.log('logged out');
 								console.log(moment().format("MM/DD/YYYY h:mm:ss a"));
@@ -208,8 +208,12 @@ rets
 			.catch(err => {
 				client.logout();
 				console.log(err);
+				console.log("ERROR")
+				console.log(moment().format("MM/DD/YYYY h:mm:ss a"));
 			});
 	})
 	.catch(err => {
 		console.log(err);
+		console.log("ERROR")
+		console.log(moment().format("MM/DD/YYYY h:mm:ss a"));
 	});

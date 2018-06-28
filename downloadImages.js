@@ -8,17 +8,7 @@ const fs = require('fs'),
 	env = process.env.NODE_ENV || 'test',
 	config = require('./config.json');
 
-/*
-Residential      = "PROPERTY.RESI"
-Multifamily      = "PROPERTY.MULTI"
-Commercial       = "PROPERTY.COMM"
-Land             = "PROPERTY.LAND"
-ResidentialRooms = "MISC.ROOMS"
-Units            = "MISC.UNITS"
-OpenHouse        = "MISC.OPEN_HOUSES"
-*/
-
-const downloadImages = (listing, type, args) => {
+const downloadImages = async (listing, type, args) => {
 	if (!_.has(listing, 'retries')) {
 		listing.retries = 0;
 	}
@@ -57,8 +47,7 @@ const downloadImages = (listing, type, args) => {
 				const filePath = `${args.photo.directory[env]}\\${fileName}`;
 				fs.writeFileSync(filePath, image.data);
 			});
-			args.photo.downloaded += images.length;
-			return args;
+			return images.length;
 		})
 		.catch(err => {
 			if (err.httpStatus === 504 && listing.retries < 10) {
@@ -67,9 +56,28 @@ const downloadImages = (listing, type, args) => {
 				return downloadImages(currentDownload.listing, currentDownload.type, currentDownload.args);
 			} else {
 				args.photo.errors.push(err);
+				return 0;
 			}
-			return args;
 		});
+};
+
+const downloadAllImages = async (listing, args) => {
+	return (await Promise
+		.all(
+			args.photo.types.map(type => {
+				return downloadImages(listing, type, args);
+			})
+		)
+		.then(results => {
+			results[0] = results[0] || 0;
+			return results.reduce((total, num) => {
+				return total + num;
+			});
+		})
+		.catch(err => {
+			throw err;
+		})) ||
+		0;
 };
 
 /*
@@ -82,12 +90,12 @@ rets
 			.connect(config.db[env].mssql)
 			.then(pool => {
 				(async pool => {
-					const search = _.where(config.searches, { type: 'RESI' })[0];
+					const search = _.find(config.searches, { type: 'RESI' });
 					const searchDate = moment().add(-search.days, 'days').format('YYYY-MM-DD');
 					const listings = (await pool
 						.request()
 						.query(
-							`SELECT MLS_NUMBER, MATRIX_UNIQUE_ID FROM RESI WHERE PHOTO_MODIFIED_DATE >='${searchDate}' AND PHOTO_COUNT > 0`
+							`SELECT TOP 1 MLS_NUMBER, MATRIX_UNIQUE_ID FROM RESI WHERE PHOTO_MODIFIED_DATE >='${searchDate}' AND PHOTO_COUNT > 0 AND STATUS IN ('Active','Contingent','Model','Pending','Show For Backups')`
 						)).recordset;
 
 					const args = {
@@ -95,50 +103,42 @@ rets
 						search: search,
 						photo: config.photo,
 					};
-/*
-					const promiseSerial = funcs =>
-					  funcs.reduce((promise, func) =>
-					    promise.then(result =>
-					      func().then(Array.prototype.concat.bind(result))),
-					      Promise.resolve([]))
-*/
-const l = [];
-l[0] = listings[0];
-l[1] = listings[1];
-const types = []
-types[0] = config.photo.types[0];
-const p = [];
+
 					try {
-						await(async () => {
-							l.forEach(async listing => {
-								types.forEach(async type => {
-									setTimeout(() => {
-										downloadImages(listing, type, args).then(r => console.log(r.photo))
-									}, 1000);
-								});
-							});
-						});
+						console.log(`Donwloading images for ${listings.length} listings`);
+						for (let listing of listings) {
+							args.photo.downloaded += await downloadAllImages(listing, args);
+						}
+						console.log(args.photo);
+
 						pool.close();
 						sql.close();
 
-						console.log('logging out');
 						client.logout().then(resp => {
 							console.log('logged out');
 							console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
 						});
 					} catch (err) {
 						console.log(err);
+						console.log('ERROR: in downloading');
+						client.logout().then(resp => {
+							console.log('logged out');
+							console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
+						});
 					}
 				})(pool);
 			})
 			.catch(err => {
 				console.log(err);
-				console.log('logging out');
+				console.log('ERROR: in getting pool connection');
 				client.logout().then(resp => {
 					console.log('logged out');
+					console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
 				});
 			});
 	})
 	.catch(err => {
 		console.log(err);
+		console.log('ERROR: in getting RETS client');
+		console.log(moment().format('MM/DD/YYYY h:mm:ss a'));
 	});
